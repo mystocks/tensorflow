@@ -414,6 +414,8 @@ class realKDayData_train(object):
         '''
         if len(self.mOrgTrainData) <= self.MAX_NUM_MEMORY:
             self.readdata_tomemory(kcount, labelcount)
+        if len(self.mOrgTrainData) <= 0:
+            return None
         orgdata = self.mOrgTrainData[self.mCurIndex]
         start_index = orgdata[0]
         while True:

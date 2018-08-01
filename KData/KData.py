@@ -18,7 +18,7 @@ with tf.name_scope('test') as scope:
   y_ = tf.placeholder("float", [None,labellen])
   cross_entropy = -tf.reduce_sum(y_*tf.log(y))
   tf.summary.scalar('loss', cross_entropy)
-  train_step = tf.train.GradientDescentOptimizer(0.002).minimize(cross_entropy)
+  train_step = tf.train.GradientDescentOptimizer(0.0015).minimize(cross_entropy)
 
 init = tf.initialize_all_variables()
 sess = tf.Session()
