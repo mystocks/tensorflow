@@ -39,7 +39,7 @@ class rnn_nton(object):
 
     # ——————————————————定义神经网络变量——————————————————
     X = tf.placeholder(tf.float32, [None, time_step, input_size])  # 每批次输入网络的tensor
-    Y = tf.placeholder(tf.float32, [None, time_step, output_size])  # 每批次tensor对应的标签
+    Y = tf.placeholder(tf.float32, [None, output_size])  # 每批次tensor对应的标签，这里修改为预测最后一次的涨跌
     # 输入层、输出层权重、偏置
     weights = {
         'in': tf.Variable(tf.random_normal([input_size, rnn_unit])),
@@ -92,7 +92,7 @@ class rnn_nton(object):
                     return False, train_x, train_y
             temp = normalize_data[self.index:self.index+self.time_step+1]
             x = temp[0:self.time_step]
-            y = temp[1:self.time_step+1]
+            y = temp[self.time_step] # 获取最后一次作为结果
             train_x.append(x)
             train_y.append(y)
             self.index += 1
@@ -103,19 +103,24 @@ class rnn_nton(object):
 
     #——————————————————定义神经网络变量——————————————————
     def lstm(self, batch):      #参数：输入网络批次数目
-        w_in=self.weights['in']
-        b_in=self.biases['in']
-        input=tf.reshape(self.X,[-1, self.input_size])  #需要将tensor转成2维进行计算，计算后的结果作为隐藏层的输入
-        input_rnn=tf.matmul(input,w_in)+b_in
-        input_rnn=tf.reshape(input_rnn,[-1,self.time_step,self.rnn_unit])  #将tensor转成3维，作为lstm cell的输入
-        cell=tf.nn.rnn_cell.BasicLSTMCell(self.rnn_unit)
-        init_state=cell.zero_state(batch,dtype=tf.float32)
-        output_rnn,final_states=tf.nn.dynamic_rnn(cell, input_rnn,initial_state=init_state, dtype=tf.float32)  #output_rnn是记录lstm每个输出节点的结果，final_states是最后一个cell的结果
-        output=tf.reshape(output_rnn,[-1,self.rnn_unit]) #作为输出层的输入
+        w_in = self.weights['in']
+        b_in = self.biases['in']
+        input = tf.reshape(self.X, [-1, self.input_size])  #需要将tensor转成2维进行计算，计算后的结果作为隐藏层的输入
+        input_rnn = tf.matmul(input, w_in)+b_in
+        input_rnn = tf.reshape(input_rnn, [-1, self.time_step, self.rnn_unit])  #将tensor转成3维，作为lstm cell的输入
+        cell = tf.nn.rnn_cell.BasicLSTMCell(self.rnn_unit)
+        init_state = cell.zero_state(batch,dtype=tf.float32)
+        output_rnn, final_states = tf.nn.dynamic_rnn(cell, input_rnn,initial_state=init_state, dtype=tf.float32)  #output_rnn是记录lstm每个输出节点的结果，final_states是最后一个cell的结果
+        #output=tf.reshape(output_rnn,[-1,self.rnn_unit]) #作为输出层的输入
+        '''
+        这里output_rnn的输出是(batch_size,time_step,rnn_uint),需要转换成(time_step, batch_size,rnn_uint)
+        转换后即可直接获取最后一个输出output_rnn[-1]作为预测
+        '''
+        output = tf.transpose(output_rnn, (1, 0, 2)) # 转换维度，编程(time_step, batch_size,rnn_uint)
         w_out=self.weights['out']
         b_out=self.biases['out']
-        pred=tf.matmul(output,w_out)+b_out
-        return pred,final_states
+        pred=tf.matmul(output[-1], w_out)+b_out # 去output最后一只值作为预测
+        return pred, final_states
 
 
 
