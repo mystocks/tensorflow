@@ -6,6 +6,7 @@ import sys
 import tensorflow as tf
 from TrainKDataSet import realKDayData_train
 import logging
+import time
 rootPath = os.path.dirname(os.getcwd())
 sys.path.append(rootPath)
 logPath = os.path.join(rootPath, 'myrnn.log')
@@ -51,6 +52,9 @@ class rnn_nton(object):
     }
     def __init__(self):
         self.mgetdata = realKDayData_train()
+        self.file_path = os.getcwd()
+        self.restore_path = os.path.join(self.file_path, 'module2')
+        self.save_path = os.path.join(self.restore_path, 'stock.model')
         pass
 
     def __getzdf(self, input):
@@ -67,12 +71,10 @@ class rnn_nton(object):
         data = self.mgetdata.getOneOrgStockData(self.batch_size + self.time_step + 1, 1)
         if data is None:
             return False
-        normalize_data = np.array(data[1]['close'])
+        normalize_data = np.array(data[1]['close']) # data[0]代表index
         normalize_data = self.__getzdf(normalize_data)
-        self.index = 0
-        self.totallen = len(normalize_data)
-        self.kdata = normalize_data
-        return True
+        totallen = len(normalize_data)
+        return True, totallen, normalize_data
 
     def get_rnn_traindata(self):
         '''
@@ -85,9 +87,10 @@ class rnn_nton(object):
         normalize_data = self.kdata
         while i < self.batch_size:
             if self.index + self.time_step + 1 >self.totallen:
-                ret = self.__getonedata()
+                ret, self.totallen, self.kdata = self.__getonedata()
                 if ret == True:
                     normalize_data = self.kdata
+                    self.index = 0
                 else:
                     return False, train_x, train_y
             temp = normalize_data[self.index:self.index+self.time_step+1]
@@ -133,16 +136,20 @@ class rnn_nton(object):
         saver=tf.train.Saver(tf.global_variables())
         with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
-
+            module_file = tf.train.latest_checkpoint(self.restore_path)
+            if module_file is not None:
+                saver.restore(sess, module_file)
             #重复训练10000次
-            for step in range(1000000):
+            for step in range(1000000000):
+                time.sleep(0.5)
                 ret,train_x,train_y = self.get_rnn_traindata()
                 if ret == True:
                     _,loss_=sess.run([train_op,loss],feed_dict={self.X:train_x,self.Y:train_y})
-                    ret, trainx, trainy = self.get_rnn_traindata()
+                    #ret, trainx, trainy = self.get_rnn_traindata()
                     #每10步保存一次参数
                     if step%99==0 and step != 0:
-                        logging.info("stop:%d, loss = %f", step,loss_)
+                        logging.info("step:%d, loss = %f", step,loss_)
+                        saver.save(sess, self.save_path)
                     step+=1
                 else:
                     break
@@ -157,7 +164,7 @@ class rnn_nton(object):
         saver=tf.train.Saver(tf.global_variables())
         with tf.Session() as sess:
             #参数恢复
-            module_file = tf.train.latest_checkpoint('.\module2')
+            module_file = tf.train.latest_checkpoint(self.restore_path)
             saver.restore(sess, module_file)
 
             #取训练集最后一行为测试样本。shape=[1,time_step,input_size]
@@ -171,8 +178,62 @@ class rnn_nton(object):
                 prev_seq=np.vstack((prev_seq[1:],next_seq[-1]))
             #以折线图表示结果
 
+    def get_predict_zd__all(self):
+        count_num = 1
+        pred,_=self.lstm(1)      #预测时只输入[1,time_step,input_size]的测试数据
+        saver=tf.train.Saver(tf.global_variables())
+        with tf.Session() as sess:
+            # 参数恢复
+            module_file = tf.train.latest_checkpoint(self.restore_path)
+            saver.restore(sess, module_file)
+
+            stock_list = self.mgetdata.get_all_stock_id_from_network()
+            for stockid in stock_list:
+                logging.info("%d:start to predict %s", count_num, stockid)
+                self.get_predict_zd_one(stockid, self.time_step, sess, pred)
+                count_num += 1
+                time.sleep(0.5)
+
+
+    def get_predict_zd_one(self, stockid, time_setp, sess, pred):
+        orgdata_df = self.mgetdata.getorg_predictdata_from_datebase(stockid, time_setp)
+        if orgdata_df is None:
+            logging.warning("getdata is None")
+            return
+        orgdata_df = self.get_orgdata_zdf(orgdata_df)
+        train_input = []
+        for index in orgdata_df.index:
+            time.sleep(0.1)
+            if index < time_setp:
+                continue
+            cur_predict = orgdata_df.loc[index]['predict1']
+            if cur_predict == 99999.9:
+                train_input = np.array(orgdata_df.loc[index-time_setp+1:index]['close'])
+                train_input = train_input[:,np.newaxis]
+                next_seq = sess.run(pred, feed_dict={self.X: [train_input]})
+                pre_zdf = next_seq[0][0]/10.0
+                if pre_zdf > 0.1:
+                    pre_zdf = 0.1
+                if pre_zdf < -0.1:
+                    pre_zdf = -0.1
+                cur_data = orgdata_df.loc[index]['date']
+                self.mgetdata.update_itemdata_to_database(stockid, cur_data, pre_zdf)
+
+    def get_orgdata_zdf(self, orgdata_df):
+        orgdata_df['newzd']=0.0
+        preclose = 0.0
+        for index in orgdata_df.index:
+            one_data = orgdata_df.loc[index]['close']
+            if preclose > 0.0:
+                orgdata_df.loc[index, 'newzd'] = (10.0*(one_data - preclose))/preclose
+            preclose  = one_data
+        return orgdata_df
+
 #prediction()
 
 rnn = rnn_nton()
-rnn.train_lstm()
+#rnn.train_lstm()
+#rnn.get_predict_zd_one('603999', 100)
+rnn.get_predict_zd__all()
+logging('predict end')
 exit(0)

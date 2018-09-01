@@ -262,6 +262,7 @@ class realKDayData_train(object):
             stock_info=ts.get_stock_basics()
             for i in stock_info.index:
                 self.all_stock_Id.append(i)
+            return self.all_stock_Id
             #print(len(self.all_stock_Id))
         except:
             print('result is:\n%s' % traceback.format_exc())
@@ -326,6 +327,34 @@ class realKDayData_train(object):
             return False
         return True
 
+    def add_newcol_totable(self, tablename, colname, defaultvalues):
+        bret = False
+        cmd="alter table %s add column %s float DEFAULT %f"%(tablename, colname, defaultvalues)
+        try:
+            self.mCur.execute(cmd)
+            bret = True
+        except:
+            bret = False
+            #logging.warning('get_one_data_form_databases:\n%s' % traceback.format_exc())
+            #print('get_one_data_form_databases:\n' % traceback.format_exc())
+        return bret
+
+    def add_newcols_all(self):
+        count = 0
+        i  = 0
+        self.get_all_stock_id_from_network()
+        print(self.all_stock_Id)
+        lenstock = len(self.all_stock_Id)
+        for stockId in self.all_stock_Id:
+            i += 1
+            tablename = "%s_KDay"%stockId
+            r = self.add_newcol_totable(tablename, "predict1", 99999.9)
+            if r == True:
+                count += 1
+            logging.info("add col to table %s_Kday,result is %d", stockId, r)
+            time.sleep(0.2)
+        logging.info("all Suc count is %d", count)
+
     def __del__(self):
         self.mConnectDb.close()
         self.mCur.close()
@@ -337,12 +366,12 @@ class realKDayData_train(object):
         :return:
         '''
         if False == self.check_Exist_StockTable_InDB(stockId):
-            #return None
-            self.get_one_stock_data_toDb_byEngine(stockId)
+            return None
+            #self.get_one_stock_data_toDb_byEngine(stockId)
 
         retList=[]
         try:
-            cmdline="select date,open,close,high,low,volume from %s_KDay;"%stockId
+            cmdline="select date,open,close,high,low,volume,predict1 from %s_KDay;"%stockId
             logging.info('cmdline = %s', cmdline)
             count=self.mCur.execute(cmdline)
             if count == 0:
@@ -398,12 +427,29 @@ class realKDayData_train(object):
             if oneData == None or len(oneData) < (kcount + 50):
                 continue
             self.mTrainLen += 1
-            oneDataDf = pd.DataFrame(np.array(oneData), columns=['date', 'open', 'close', 'high', 'low', 'volume'])
-            dfcolmus = ['open', 'close', 'high', 'low', 'volume']
-            oneDataDf[dfcolmus] = oneDataDf[dfcolmus].astype('float64')
+            oneDataDf = pd.DataFrame(np.array(oneData), columns=['date', 'open', 'close', 'high', 'low', 'volume', 'predict1'])
+            dfcolmus = ['open', 'close', 'high', 'low', 'volume', 'predict1']
+            oneDataDf[dfcolmus] = oneDataDf[dfcolmus].astype('float64') # chanage all type
             self.mOrgTrainData.append([0, oneDataDf])
             if self.mTrainLen > self.MAX_NUM_MEMORY:
                 break
+
+    def getorg_predictdata_from_datebase(self, stockid, kcount):
+        '''
+        预测时获取原始数据
+        :param stockid:
+        :param kcount:
+        :return:
+        '''
+        oneData = self.get_one_data_form_databases(stockid)
+        if oneData == None or len(oneData) < (kcount):
+            print("getFrom database Error")
+            return None
+        oneDataDf = pd.DataFrame(np.array(oneData),
+                                 columns=['date', 'open', 'close', 'high', 'low', 'volume', 'predict1'])
+        dfcolmus = ['open', 'close', 'high', 'low', 'volume', 'predict1']
+        oneDataDf[dfcolmus] = oneDataDf[dfcolmus].astype('float64')  # chanage all type
+        return oneDataDf
 
     def getOneOrgStockData(self, kcount, labelcount):
         '''
@@ -499,6 +545,15 @@ class realKDayData_train(object):
         ret[i] = 1
         return ret
 
+    def update_itemdata_to_database(self, stockid, curdate, predata):
+        sqlline = "UPDATE %s_KDay SET predict1=%f Where `date`='%s';"%(stockid, predata, curdate)
+        #logging.info(sqlline)
+        try:
+            self.mCur.execute(sqlline)
+            self.mConnectDb.commit()
+        except:
+            self.mConnectDb.rollback()
+            logging.warning("update error")
 
 
 
@@ -506,8 +561,7 @@ class realKDayData_train(object):
 '''
 myKDay = realKDayData_train()
 #data = myKDay.get_all_sotck_data_from_database()
-train, label =  myKDay.get_train_stock_data_from_database(100, 100, 10)
-print(len(train[0]))
+myKDay.update_itemdata_to_database('603999', '2018-08-17', 0.05333356)
 del myKDay
 '''
 #id = '603999'
